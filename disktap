@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+import sys
+import os
+import subprocess
+import argparse
+import tempfile
+
+
+def record(output_path, seconds, size, offset):
+    subprocess.check_call(
+        ['ffmpeg', '-video_size', '{}x{}'.format(*size),
+         '-framerate', '25', '-f', 'x11grab', '-t', str(seconds),
+         '-i', ':0.0+{},{}'.format(*offset), '-c:v', 'huffyuv',
+         '-f', 'avi', output_path
+        ])
+
+def make_small(input_path, output_path):
+    # Two passes.
+    subprocess.check_call(
+        ['ffmpeg', '-i', input_path, '-c:v', 'vp8',
+         '-pass', '1', '-b:v', '1000K', '-threads', '8',
+         '-speed', '4', '-an', '-f', 'webm', '-y', '/dev/null'
+        ])
+    subprocess.check_call(
+        ['ffmpeg', '-i', input_path, '-c:v', 'vp8',
+         '-pass', '2', '-b:v', '1000K', '-threads', '8',
+         '-speed', '1', '-auto-alt-ref', '1', '-lag-in-frames', '25',
+         '-f', 'webm', output_path
+        ])
+    os.remove('ffmpeg2pass-0.log')
+
+def int_tuple(s):
+    return tuple(map(int, s.split('x')))
+
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument('--seconds', type=int, metavar='N',
+                    default=60,
+                    help='set the number of seconds to record')
+parser.add_argument('--size', type=int_tuple, metavar='WIDTHxHEIGHT',
+                    default=(800, 600),
+                    help='set the size of the area to record')
+parser.add_argument('--offset', type=int_tuple, metavar='X_OFFSETxY_OFFSET',
+                    default=(0, 0),
+                    help='set the offset of the area to record')
+parser.add_argument('--centered-offset', action='store_true',
+                    help='set the offset so that the area is in the center of the screen')
+parser.add_argument('output', type=str, metavar='output.webm',
+                    help='set the output filename')
+args = parser.parse_args()
+
+if args.centered_offset:
+    screen_size = (1920, 1080) # FIXME
+    args.offset = ((screen_size[0] - args.size[0]) // 2,
+                   (screen_size[1] - args.size[1]) // 2)
+
+with tempfile.TemporaryDirectory() as temp_dir:
+    temp_output = os.path.join(temp_dir, 'temp.avi')
+    record(temp_output, args.seconds, args.size, args.offset)
+    make_small(temp_output, args.output)
